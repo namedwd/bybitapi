@@ -132,14 +132,18 @@ function handleBybitMessage(message) {
     // 티커 데이터 업데이트
     if (data && data[0]) {
       const ticker = data[0];
+      console.log('Ticker raw data:', ticker); // 디버깅용
+      
       marketData.ticker = {
-        last: parseFloat(ticker.lastPrice) || 0,
-        change24h: parseFloat(ticker.price24hPcnt) * 100 || 0,
-        changePercent: parseFloat(ticker.price24hPcnt) * 100 || 0,
-        volume24h: parseFloat(ticker.volume24h) || 0,
-        high24h: parseFloat(ticker.highPrice24h) || 0,
-        low24h: parseFloat(ticker.lowPrice24h) || 0
+        last: parseFloat(ticker.lastPrice || ticker.last_price || 0),
+        change24h: parseFloat(ticker.price24hPcnt || ticker.price_24h_pcnt || 0) * 100,
+        changePercent: parseFloat(ticker.price24hPcnt || ticker.price_24h_pcnt || 0) * 100,
+        volume24h: parseFloat(ticker.volume24h || ticker.volume_24h || 0),
+        high24h: parseFloat(ticker.highPrice24h || ticker.high_price_24h || 0),
+        low24h: parseFloat(ticker.lowPrice24h || ticker.low_price_24h || 0)
       };
+      
+      console.log('Processed ticker:', marketData.ticker); // 디버깅용
       
       // 모든 클라이언트에게 전송
       broadcastToAll({
