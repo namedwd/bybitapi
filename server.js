@@ -9,7 +9,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 8080;
+const PORT = parseInt(process.env.PORT) || 8080;
 
 // 바이비트 웹소켓 URL
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
@@ -676,8 +676,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.listen(PORT + 1, () => {
-  console.log(`HTTP server running on port ${PORT + 1}`);
+const HTTP_PORT = PORT + 1;
+app.listen(HTTP_PORT, () => {
+  console.log(`HTTP server running on port ${HTTP_PORT}`);
 });
 
 // 종료 처리
