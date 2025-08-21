@@ -40,9 +40,28 @@ console.log(`WebSocket server running on port ${PORT}`);
 
 // 바이비트 실시간 데이터 연결
 let bybitWs = null;
+let pingInterval = null;
+let reconnectTimeout = null;
 
 function connectBybit() {
-  bybitWs = new WebSocket(BYBIT_WS_URL);
+  try {
+    // 기존 연결 정리
+    if (bybitWs) {
+      bybitWs.close();
+      bybitWs = null;
+    }
+    
+    if (pingInterval) {
+      clearInterval(pingInterval);
+      pingInterval = null;
+    }
+    
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+
+    bybitWs = new WebSocket(BYBIT_WS_URL);
   
   bybitWs.on('open', () => {
     console.log('Connected to Bybit WebSocket');
@@ -60,8 +79,8 @@ function connectBybit() {
     bybitWs.send(JSON.stringify(subscribeMsg));
     
     // 핑 메시지 (연결 유지)
-    setInterval(() => {
-      if (bybitWs.readyState === WebSocket.OPEN) {
+    pingInterval = setInterval(() => {
+      if (bybitWs && bybitWs.readyState === WebSocket.OPEN) {
         bybitWs.send(JSON.stringify({ op: "ping" }));
       }
     }, 20000);
@@ -80,13 +99,29 @@ function connectBybit() {
   });
   
   bybitWs.on('close', () => {
-    console.log('Bybit WebSocket disconnected, reconnecting...');
-    setTimeout(connectBybit, 5000);
+    console.log('Bybit WebSocket disconnected, reconnecting in 5s...');
+    
+    if (pingInterval) {
+      clearInterval(pingInterval);
+      pingInterval = null;
+    }
+    
+    reconnectTimeout = setTimeout(() => {
+      connectBybit();
+    }, 5000);
   });
   
   bybitWs.on('error', (error) => {
-    console.error('Bybit WebSocket error:', error);
+    console.error('Bybit WebSocket error:', error.message);
   });
+  
+  } catch (error) {
+    console.error('Error in connectBybit:', error.message);
+    
+    reconnectTimeout = setTimeout(() => {
+      connectBybit();
+    }, 10000);
+  }
 }
 
 // 바이비트 메시지 처리
@@ -98,12 +133,12 @@ function handleBybitMessage(message) {
     if (data && data[0]) {
       const ticker = data[0];
       marketData.ticker = {
-        last: parseFloat(ticker.lastPrice),
-        change24h: parseFloat(ticker.price24hPcnt) * 100,
-        changePercent: parseFloat(ticker.price24hPcnt) * 100,
-        volume24h: parseFloat(ticker.volume24h),
-        high24h: parseFloat(ticker.highPrice24h),
-        low24h: parseFloat(ticker.lowPrice24h)
+        last: parseFloat(ticker.lastPrice) || 0,
+        change24h: parseFloat(ticker.price24hPcnt) * 100 || 0,
+        changePercent: parseFloat(ticker.price24hPcnt) * 100 || 0,
+        volume24h: parseFloat(ticker.volume24h) || 0,
+        high24h: parseFloat(ticker.highPrice24h) || 0,
+        low24h: parseFloat(ticker.lowPrice24h) || 0
       };
       
       // 모든 클라이언트에게 전송
@@ -177,7 +212,8 @@ async function loadInitialCandles() {
         symbol: 'BTCUSDT',
         interval: '1',
         limit: 200
-      }
+      },
+      timeout: 10000
     });
     
     if (response.data.result && response.data.result.list) {
@@ -490,17 +526,23 @@ function updateClientOrders(userId) {
 }
 
 // 모든 포지션 PnL 업데이트 (정기적으로 실행)
+let pnlInterval = null;
+
 function updateAllPositionsPnL() {
-  mockData.positions.forEach((position) => {
-    updateClientPositions(position.userId);
-  });
-  
-  // 지정가 주문 체결 확인
-  mockData.orders.forEach((order) => {
-    if (order.status === 'pending') {
-      checkOrderExecution(order.id);
-    }
-  });
+  try {
+    mockData.positions.forEach((position) => {
+      updateClientPositions(position.userId);
+    });
+    
+    // 지정가 주문 체결 확인
+    mockData.orders.forEach((order) => {
+      if (order.status === 'pending') {
+        checkOrderExecution(order.id);
+      }
+    });
+  } catch (error) {
+    console.error('Error updating PnL:', error.message);
+  }
 }
 
 // WebSocket 클라이언트 연결 처리
@@ -609,11 +651,15 @@ function handleClientMessage(clientId, message) {
 
 // 초기화
 async function init() {
+  console.log('Initializing server...');
   await loadInitialCandles();
   connectBybit();
   
-  // PnL 업데이트 (1초마다)
-  setInterval(updateAllPositionsPnL, 1000);
+  // PnL 업데이트 (5초마다로 변경 - CPU 부하 감소)
+  if (pnlInterval) {
+    clearInterval(pnlInterval);
+  }
+  pnlInterval = setInterval(updateAllPositionsPnL, 5000);
   
   console.log('Mock trading server initialized');
 }
@@ -632,6 +678,30 @@ app.get('/health', (req, res) => {
 
 app.listen(PORT + 1, () => {
   console.log(`HTTP server running on port ${PORT + 1}`);
+});
+
+// 종료 처리
+process.on('SIGINT', () => {
+  console.log('Shutting down gracefully...');
+  
+  if (pingInterval) clearInterval(pingInterval);
+  if (pnlInterval) clearInterval(pnlInterval);
+  if (reconnectTimeout) clearTimeout(reconnectTimeout);
+  if (bybitWs) bybitWs.close();
+  
+  wss.close(() => {
+    process.exit(0);
+  });
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error.message);
+  // 서버를 계속 실행
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled Rejection:', error.message);
+  // 서버를 계속 실행
 });
 
 // 서버 시작
