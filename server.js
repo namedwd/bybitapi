@@ -150,23 +150,65 @@ function handleBybitMessage(message) {
   } else if (topic.includes('orderbook')) {
     // 오더북 데이터 업데이트
     if (data) {
-      const orderbook = {
-        bids: data.b ? data.b.slice(0, 20).map(([price, size]) => ({
-          price: parseFloat(price),
-          size: parseFloat(size)
-        })) : marketData.orderbook.bids,
-        asks: data.a ? data.a.slice(0, 20).map(([price, size]) => ({
-          price: parseFloat(price),
-          size: parseFloat(size)
-        })) : marketData.orderbook.asks
-      };
+      // 스냅샷 또는 업데이트 확인
+      const isSnapshot = data.type === 'snapshot';
       
-      marketData.orderbook = orderbook;
+      if (isSnapshot) {
+        // 스냅샷: 전체 오더북 교체
+        marketData.orderbook = {
+          bids: data.b ? data.b.slice(0, 20).map(([price, size]) => ({
+            price: parseFloat(price),
+            size: parseFloat(size)
+          })) : [],
+          asks: data.a ? data.a.slice(0, 20).map(([price, size]) => ({
+            price: parseFloat(price),
+            size: parseFloat(size)
+          })) : []
+        };
+      } else {
+        // 델타 업데이트: 기존 오더북 업데이트
+        // 매수 호가 업데이트
+        if (data.b) {
+          const bidMap = new Map(marketData.orderbook.bids.map(b => [b.price, b]));
+          data.b.forEach(([price, size]) => {
+            const p = parseFloat(price);
+            const s = parseFloat(size);
+            if (s === 0) {
+              bidMap.delete(p);
+            } else {
+              bidMap.set(p, { price: p, size: s });
+            }
+          });
+          marketData.orderbook.bids = Array.from(bidMap.values())
+            .sort((a, b) => b.price - a.price)
+            .slice(0, 20);
+        }
+        
+        // 매도 호가 업데이트
+        if (data.a) {
+          const askMap = new Map(marketData.orderbook.asks.map(a => [a.price, a]));
+          data.a.forEach(([price, size]) => {
+            const p = parseFloat(price);
+            const s = parseFloat(size);
+            if (s === 0) {
+              askMap.delete(p);
+            } else {
+              askMap.set(p, { price: p, size: s });
+            }
+          });
+          marketData.orderbook.asks = Array.from(askMap.values())
+            .sort((a, b) => a.price - b.price)
+            .slice(0, 20);
+        }
+      }
       
-      broadcastToAll({
-        type: 'orderbook',
-        data: marketData.orderbook
-      });
+      // 유효한 데이터가 있을 때만 브로드캐스트
+      if (marketData.orderbook.bids.length > 0 || marketData.orderbook.asks.length > 0) {
+        broadcastToAll({
+          type: 'orderbook',
+          data: marketData.orderbook
+        });
+      }
     }
   } else if (topic.includes('kline')) {
     // 캔들 데이터 업데이트
