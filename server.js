@@ -4,9 +4,6 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
-const bybitRouter = require('./routes/bybit');
-const websocketService = require('./services/websocket');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -37,12 +34,26 @@ app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    cpu: process.cpuUsage()
   });
 });
 
-// API routes
-app.use('/api/bybit', bybitRouter);
+// Initialize routes with try-catch to prevent circular dependency
+let bybitRouter;
+let websocketService;
+
+try {
+  bybitRouter = require('./routes/bybit');
+  app.use('/api/bybit', bybitRouter);
+} catch (error) {
+  console.error('Failed to load bybit router:', error.message);
+  // Create a fallback route
+  app.use('/api/bybit', (req, res) => {
+    res.status(503).json({ error: 'Bybit service temporarily unavailable' });
+  });
+}
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -64,37 +75,89 @@ app.use((req, res) => {
 });
 
 // Start server
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Bybit API Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Memory usage:`, process.memoryUsage());
   
-  // Initialize WebSocket connection if enabled
+  // Initialize WebSocket connection if enabled (with delay to prevent startup surge)
   if (process.env.ENABLE_WEBSOCKET === 'true') {
-    websocketService.initialize();
+    setTimeout(() => {
+      try {
+        websocketService = require('./services/websocket');
+        websocketService.initialize();
+        console.log('WebSocket service initialized');
+      } catch (error) {
+        console.error('Failed to initialize WebSocket:', error.message);
+      }
+    }, 5000); // 5 second delay
   }
 });
 
+// Set server timeout
+server.timeout = 30000; // 30 seconds
+
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received. Closing server gracefully...');
+const gracefulShutdown = (signal) => {
+  console.log(`${signal} received. Starting graceful shutdown...`);
+  
+  // Stop accepting new connections
   server.close(() => {
-    console.log('Server closed');
-    if (websocketService.isConnected()) {
+    console.log('HTTP server closed');
+    
+    // Close WebSocket if connected
+    if (websocketService && websocketService.isConnected && websocketService.isConnected()) {
       websocketService.disconnect();
+      console.log('WebSocket disconnected');
     }
+    
+    console.log('Graceful shutdown complete');
     process.exit(0);
   });
+  
+  // Force shutdown after 10 seconds
+  setTimeout(() => {
+    console.error('Could not close connections in time, forcefully shutting down');
+    process.exit(1);
+  }, 10000);
+};
+
+// Handle shutdown signals
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  gracefulShutdown('uncaughtException');
 });
 
-process.on('SIGINT', () => {
-  console.log('SIGINT received. Closing server gracefully...');
-  server.close(() => {
-    console.log('Server closed');
-    if (websocketService.isConnected()) {
-      websocketService.disconnect();
-    }
-    process.exit(0);
-  });
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
+
+// Memory usage monitoring
+setInterval(() => {
+  const used = process.memoryUsage();
+  const usage = {
+    rss: `${Math.round(used.rss / 1024 / 1024 * 100) / 100} MB`,
+    heapTotal: `${Math.round(used.heapTotal / 1024 / 1024 * 100) / 100} MB`,
+    heapUsed: `${Math.round(used.heapUsed / 1024 / 1024 * 100) / 100} MB`,
+    external: `${Math.round(used.external / 1024 / 1024 * 100) / 100} MB`
+  };
+  
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('Memory usage:', usage);
+  }
+  
+  // Trigger garbage collection if heap usage is too high (over 400MB)
+  if (used.heapUsed > 400 * 1024 * 1024) {
+    if (global.gc) {
+      global.gc();
+      console.log('Manual garbage collection triggered');
+    }
+  }
+}, 60000); // Check every minute
 
 module.exports = app;
