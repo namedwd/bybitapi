@@ -1,24 +1,20 @@
 module.exports = {
   apps: [{
-    name: 'bybit-mock-server',
-    script: './server-new.js',
+    name: 'bybit-api-server',
+    script: './server.js',
     instances: 1,
     autorestart: true,
     watch: false,
     max_memory_restart: '1G',
     env: {
       NODE_ENV: 'production',
-      WS_PORT: 8080,
-      HTTP_PORT: 8081
+      PORT: 3000
     },
-    env_production: {
-      NODE_ENV: 'production',
-      WS_PORT: 8080,
-      HTTP_PORT: 8081
-    },
-    error_file: './logs/err.log',
+    error_file: './logs/error.log',
     out_file: './logs/out.log',
     log_file: './logs/combined.log',
-    time: true
+    time: true,
+    merge_logs: true,
+    log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
   }]
 };
