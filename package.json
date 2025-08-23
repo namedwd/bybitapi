@@ -4,8 +4,10 @@
   "description": "Bybit mock trading server",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "start": "node server-new.js",
+    "start:old": "node server.js",
+    "dev": "nodemon server-new.js",
+    "dev:old": "nodemon server.js"
   },
   "dependencies": {
     "ws": "^8.14.2",
